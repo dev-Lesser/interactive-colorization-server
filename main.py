@@ -14,6 +14,20 @@ import cv2
 from data import lab_gamut
 from skimage import color
 # Choose gpu to run the model on
+import re
+from colormath.color_objects import LabColor, sRGBColor 
+from colormath.color_conversions import convert_color 
+
+def hex_to_rgb(hx, hsl=False):
+    if re.compile(r'#[a-fA-F0-9]{3}(?:[a-fA-F0-9]{3})?$').match(hx):
+        div = 255.0 if hsl else 0
+        if len(hx) <= 4:
+            return tuple(int(hx[i]*2, 16) / div if div else
+                            int(hx[i]*2, 16) for i in (1, 2, 3))
+        return tuple(int(hx[i:i+2], 16) / div if div else
+                        int(hx[i:i+2], 16) for i in (1, 3, 5))
+    raise ValueError(f'"{hx}" is not a valid HEX code.')
+
 gpu_id = -1
 
 colorModel = CI.ColorizeImageTorch(Xd=256,maskcent=3)
@@ -54,9 +68,16 @@ input_ab = np.zeros((2,256,256)) # ab values of user points, default to 0 for no
 async def clear():
 
     global colorModel
-
+    global defaultFile
+    global defaultImg
+    global mask
+    global input_ab
+    defaultFile = None
+    defaultImg = None
     colorModel = CI.ColorizeImageTorch(Xd=256,maskcent=3)
     colorModel.prep_net(path='./models/pytorch/pytorch.pth')
+    mask = np.zeros((1,256,256))
+    input_ab = np.zeros((2,256,256))
     return JSONResponse(
             status_code=200,
             content='cleared'
@@ -86,7 +107,7 @@ async def default_color_predict( file: bytes = File(...)):
 
 @app.post("/api/v1/colorize/point")
 async def user_add_predict(
-        pointsX: list = Form(...),pointsY: list= Form(...), colors: list= Form(...)
+        pointsX: str = Form(...),pointsY: str= Form(...), colors: str= Form(...)
     ):
     global defaultFile
     global defaultImg
@@ -96,37 +117,32 @@ async def user_add_predict(
 
     if (not defaultFile):
         return JSONResponse(
-            status_code=401,
+            status_code=404,
             content='error'
         )
-    x_list      = [int(i) for i in pointsX]
-    y_list      = [int(i) for i in pointsY]
-    colorlist   = [json.loads(i) for i in colors]
-    if (len(x_list) != len(y_list)) or (len(x_list)!=len(colorlist) or(len(x_list)>3)):
+    x_list      = [int(i) for i in pointsX.split(',')]
+    y_list      = [int(i) for i in pointsY.split(',')]
+    colors = colors.split(',')
+    if (len(x_list) != len(y_list)) or(len(x_list)>3):
         return JSONResponse(
-            status_code=402,
+            status_code=404,
             content='error'
         )
 
-    # add a blue point in the middle of the image
-    for x,y,_color in list(zip(x_list,y_list,colorlist)):
-        # print(colorlist, defaultImg.shape)
-        # color_array = np.array(_color).astype('uint8')
-        # im_lab = color.rgb2lab(defaultImg[:, :, ::-1])
-        # im_l = im_lab[:, :, 0]
-        # mean_L = im_l[y, x]
-        # snap_color = lab_gamut.snap_ab(mean_L, color_array)
-        # print(snap_color)
+    for x,y,_hex in list(zip(x_list,y_list,colors)):
 
+        rgb = sRGBColor(hex_to_rgb(_hex)[0],hex_to_rgb(_hex)[1],hex_to_rgb(_hex)[2],  is_upscaled=True)
+        lab =  convert_color(rgb, LabColor).get_value_tuple()
+        _color = lab[1:]
         (input_ab,mask) = put_point(input_ab,mask,[x,y],3,_color)
-        img_out = colorModel.net_forward(input_ab,mask)
+        img_out = colorModel.net_forward(input_ab,mask) # run model, returns 256x256 image
+
 
     mask_fullres = colorModel.get_img_mask_fullres() # get input mask in full res
     img_in_fullres = colorModel.get_input_img_fullres() # get input image in full res
     img_out_fullres = colorModel.get_img_fullres() # get image at full resolution
 
 
-    img_out = colorModel.net_forward(input_ab,mask) # run model, returns 256x256 image
 
     img_out_fullres = colorModel.get_img_fullres() # get image at full resolution
     converted = img_out_fullres[...,::-1].copy()
