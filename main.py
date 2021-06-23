@@ -1,19 +1,16 @@
 from data import colorize_image as CI
-import matplotlib.pyplot as plt
 import numpy as np
 from starlette.responses import StreamingResponse
 import io, uvicorn
-from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile,Response, Form
+from fastapi import FastAPI,  File, Form
 from fastapi.responses import JSONResponse
 from fastapi_jwt_auth import AuthJWT
 from fastapi_jwt_auth.exceptions import AuthJWTException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import json
 import cv2
-from data import lab_gamut
-from skimage import color
 # Choose gpu to run the model on
+import base64
 import re
 from colormath.color_objects import LabColor, sRGBColor 
 from colormath.color_conversions import convert_color 
@@ -61,8 +58,8 @@ def put_point(input_ab,mask,loc,p,val):
 
 defaultFile = None
 defaultImg = None
-mask = np.zeros((1,256,256)) # giving no user points, so mask is all 0's
-input_ab = np.zeros((2,256,256)) # ab values of user points, default to 0 for no input
+mask = np.zeros((1,256,256)) 
+input_ab = np.zeros((2,256,256)) 
 
 @app.get("/api/v1/clear")
 async def clear():
@@ -87,30 +84,40 @@ async def clear():
 async def default_color_predict( file: bytes = File(...)):
 
     global defaultFile
-    global defaultImg
+
     global colorModel
     global mask
     global input_ab
+
+    mask = np.zeros((1,256,256)) 
+    input_ab = np.zeros((2,256,256)) 
+
     defaultFile = file
-    defaultImg = np.fromstring(file, dtype=np.uint8)
-    defaultImg = cv2.imdecode(defaultImg, cv2.IMREAD_COLOR)
 
     colorModel.load_image(file) 
 
-    img_out = colorModel.net_forward(input_ab,mask)
+    _ = colorModel.net_forward(input_ab,mask)
 
     img_out_fullres = colorModel.get_img_fullres()
 
     converted = img_out_fullres[...,::-1].copy()
-    res, img_png = cv2.imencode(".png",converted)
-    return StreamingResponse(io.BytesIO(img_png.tobytes()), media_type="image/png")
+    _, img_png = cv2.imencode(".png",converted)
+    # print(type(img_png))
+    
+    # result_img_string = img_png.tobytes()
+    # print(base64.b64encode(img_png))
+    return base64.b64encode(img_png)
+            
+        
+
+    # return StreamingResponse(io.BytesIO(img_png.tobytes()), media_type="image/png")
 
 @app.post("/api/v1/colorize/point")
 async def user_add_predict(
         pointsX: str = Form(...),pointsY: str= Form(...), colors: str= Form(...)
     ):
     global defaultFile
-    global defaultImg
+
     global colorModel
     global mask
     global input_ab
@@ -118,7 +125,7 @@ async def user_add_predict(
     if (not defaultFile):
         return JSONResponse(
             status_code=404,
-            content='error'
+            content='please upload image'
         )
     x_list      = [int(i) for i in pointsX.split(',')]
     y_list      = [int(i) for i in pointsY.split(',')]
@@ -131,15 +138,15 @@ async def user_add_predict(
 
     for x,y,_hex in list(zip(x_list,y_list,colors)):
 
-        rgb = sRGBColor(hex_to_rgb(_hex)[0],hex_to_rgb(_hex)[1],hex_to_rgb(_hex)[2],  is_upscaled=True)
-        lab =  convert_color(rgb, LabColor).get_value_tuple()
-        _color = lab[1:]
+        rgb = sRGBColor(hex_to_rgb(_hex)[0],hex_to_rgb(_hex)[1],hex_to_rgb(_hex)[2],  is_upscaled=True) # hex -> rgb
+        lab =  convert_color(rgb, LabColor).get_value_tuple() # rgb -> lab
+        _color = lab[1:] # lab -> ab
         (input_ab,mask) = put_point(input_ab,mask,[x,y],3,_color)
         img_out = colorModel.net_forward(input_ab,mask) # run model, returns 256x256 image
 
 
-    mask_fullres = colorModel.get_img_mask_fullres() # get input mask in full res
-    img_in_fullres = colorModel.get_input_img_fullres() # get input image in full res
+    _ = colorModel.get_img_mask_fullres() # get input mask in full res
+    _ = colorModel.get_input_img_fullres() # get input image in full res
     img_out_fullres = colorModel.get_img_fullres() # get image at full resolution
 
 
@@ -147,7 +154,7 @@ async def user_add_predict(
     img_out_fullres = colorModel.get_img_fullres() # get image at full resolution
     converted = img_out_fullres[...,::-1].copy()
 
-    res, img_png = cv2.imencode(".png", converted)
+    _, img_png = cv2.imencode(".png", converted)
     return StreamingResponse(io.BytesIO(img_png.tobytes()), media_type="image/png")
 
 if __name__ == "__main__":

@@ -1,8 +1,6 @@
 import numpy as np
 import cv2
 from skimage import color
-from sklearn.cluster import KMeans
-import os
 from scipy.ndimage.interpolation import zoom
 
 
@@ -44,6 +42,8 @@ class ColorizeImageBase():
         # rgb image [CxXdxXd]
         encoded_img = np.fromstring(input_path, dtype=np.uint8)
         img = cv2.imdecode(encoded_img, cv2.IMREAD_COLOR)
+
+        img = cv2.resize(img, (512, int(512 * img.shape[0]/img.shape[1])))
         im = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         self.img_rgb_fullres = im.copy()
         self._set_img_lab_fullres_()
@@ -308,40 +308,7 @@ class ColorizeImageTorchDist(ColorizeImageTorch):
         # return
         return function_return
 
-    def get_ab_reccs(self, h, w, K=5, N=25000, return_conf=False):
-        ''' Recommended colors at point (h,w)
-        Call this after calling net_forward
-        '''
-        if not self.dist_ab_set:
-            print('Need to set prediction first')
-            return 0
-
-        # randomly sample from pdf
-        cmf = np.cumsum(self.dist_ab[:, h, w])  # CMF
-        cmf = cmf / cmf[-1]
-        cmf_bins = cmf
-
-        # randomly sample N points
-        rnd_pts = np.random.uniform(low=0, high=1.0, size=N)
-        inds = np.digitize(rnd_pts, bins=cmf_bins)
-        rnd_pts_ab = self.pts_in_hull[inds, :]
-
-        # run k-means
-        kmeans = KMeans(n_clusters=K).fit(rnd_pts_ab)
-
-        # sort by cluster occupancy
-        k_label_cnt = np.histogram(kmeans.labels_, np.arange(0, K + 1))[0]
-        k_inds = np.argsort(k_label_cnt, axis=0)[::-1]
-
-        cluster_per = 1. * k_label_cnt[k_inds] / N  # percentage of points within cluster
-        cluster_centers = kmeans.cluster_centers_[k_inds, :]  # cluster centers
-
-        # cluster_centers = np.random.uniform(low=-100,high=100,size=(N,2))
-        if return_conf:
-            return cluster_centers, cluster_per
-        else:
-            return cluster_centers
-
+   
     def compute_entropy(self):
         # compute the distribution entropy (really slow right now)
         self.dist_entropy = np.sum(self.dist_ab * np.log(self.dist_ab), axis=0)
