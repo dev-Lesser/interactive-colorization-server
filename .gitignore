@@ -1,0 +1,14 @@
+*.npy
+*_log
+*.pyc
+*.DS_Store
+
+
+__pycache__
+__init__.py
+
+# PyTorch models
+*.pth
+
+
+.ipynb_checkpoints/
