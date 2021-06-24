@@ -56,23 +56,22 @@ def put_point(input_ab,mask,loc,p,val):
     mask[:,loc[0]-p:loc[0]+p+1,loc[1]-p:loc[1]+p+1] = 1
     return (input_ab,mask)
 
-defaultFile = None
-defaultImg = None
 mask = np.zeros((1,256,256)) 
 input_ab = np.zeros((2,256,256)) 
-
+colorModelDict = {}
 @app.get("/api/v1/clear")
-async def clear():
+async def clear(timestamp: int):
 
-    global colorModel
-    global defaultFile
-    global defaultImg
+    global colorModelDict
     global mask
     global input_ab
-    defaultFile = None
-    defaultImg = None
-    colorModel = CI.ColorizeImageTorch(Xd=256,maskcent=3)
-    colorModel.prep_net(path='./models/pytorch/pytorch.pth')
+    if timestamp not in colorModelDict.keys():
+        return JSONResponse(
+            status_code=404,
+            content='error'
+        )
+    del colorModelDict[str(timestamp)]
+
     mask = np.zeros((1,256,256))
     input_ab = np.zeros((2,256,256))
     return JSONResponse(
@@ -81,51 +80,41 @@ async def clear():
         )
 
 @app.post("/api/v1/colorize")
-async def default_color_predict( file: bytes = File(...)):
-
-    global defaultFile
-
-    global colorModel
+async def default_color_predict(timestamp: int,file: bytes = File(...)):
+    global colorModelDict
     global mask
     global input_ab
+    colorModel = CI.ColorizeImageTorch(Xd=256,maskcent=3)
+    colorModel.prep_net(path='./models/pytorch/pytorch.pth')
 
     mask = np.zeros((1,256,256)) 
     input_ab = np.zeros((2,256,256)) 
 
-    defaultFile = file
+    colorModelDict[str(timestamp)] = colorModel
+    colorModelDict[str(timestamp)].load_image(file)
 
-    colorModel.load_image(file) 
+    _ = colorModelDict[str(timestamp)].net_forward(input_ab,mask)
 
-    _ = colorModel.net_forward(input_ab,mask)
-
-    img_out_fullres = colorModel.get_img_fullres()
+    img_out_fullres = colorModelDict[str(timestamp)].get_img_fullres()
 
     converted = img_out_fullres[...,::-1].copy()
     _, img_png = cv2.imencode(".png",converted)
-    # print(type(img_png))
-    
-    # result_img_string = img_png.tobytes()
-    # print(base64.b64encode(img_png))
+
     return base64.b64encode(img_png)
             
-        
-
-    # return StreamingResponse(io.BytesIO(img_png.tobytes()), media_type="image/png")
 
 @app.post("/api/v1/colorize/point")
-async def user_add_predict(
+async def user_add_predict(timestamp: int,
         pointsX: str = Form(...),pointsY: str= Form(...), colors: str= Form(...)
     ):
-    global defaultFile
-
-    global colorModel
+    global colorModelDict
     global mask
     global input_ab
-
-    if (not defaultFile):
+    print(colorModelDict)
+    if str(timestamp) not in colorModelDict.keys():
         return JSONResponse(
             status_code=404,
-            content='please upload image'
+            content='error'
         )
     x_list      = [int(i) for i in pointsX.split(',')]
     y_list      = [int(i) for i in pointsY.split(',')]
@@ -135,23 +124,22 @@ async def user_add_predict(
             status_code=404,
             content='error'
         )
-
     for x,y,_hex in list(zip(x_list,y_list,colors)):
 
         rgb = sRGBColor(hex_to_rgb(_hex)[0],hex_to_rgb(_hex)[1],hex_to_rgb(_hex)[2],  is_upscaled=True) # hex -> rgb
         lab =  convert_color(rgb, LabColor).get_value_tuple() # rgb -> lab
         _color = lab[1:] # lab -> ab
         (input_ab,mask) = put_point(input_ab,mask,[x,y],3,_color)
-        img_out = colorModel.net_forward(input_ab,mask) # run model, returns 256x256 image
+        img_out = colorModelDict[str(timestamp)].net_forward(input_ab,mask) # run model, returns 256x256 image
 
 
-    _ = colorModel.get_img_mask_fullres() # get input mask in full res
-    _ = colorModel.get_input_img_fullres() # get input image in full res
-    img_out_fullres = colorModel.get_img_fullres() # get image at full resolution
+    _ = colorModelDict[str(timestamp)].get_img_mask_fullres() # get input mask in full res
+    _ = colorModelDict[str(timestamp)].get_input_img_fullres() # get input image in full res
+    img_out_fullres = colorModelDict[str(timestamp)].get_img_fullres() # get image at full resolution
 
 
 
-    img_out_fullres = colorModel.get_img_fullres() # get image at full resolution
+    img_out_fullres = colorModelDict[str(timestamp)].get_img_fullres() # get image at full resolution
     converted = img_out_fullres[...,::-1].copy()
 
     _, img_png = cv2.imencode(".png", converted)
