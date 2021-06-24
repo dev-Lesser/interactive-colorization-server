@@ -155,7 +155,13 @@ async def user_add_predict(
     converted = img_out_fullres[...,::-1].copy()
 
     _, img_png = cv2.imencode(".png", converted)
-    return StreamingResponse(io.BytesIO(img_png.tobytes()), media_type="image/png")
+
+    # print(type(img_png))
+    
+    # result_img_string = img_png.tobytes()
+    # print(base64.b64encode(img_png))
+    return base64.b64encode(img_png)
+    # return StreamingResponse(io.BytesIO(img_png.tobytes()), media_type="image/png")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
