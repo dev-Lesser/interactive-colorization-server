@@ -58,19 +58,13 @@ def put_point(input_ab,mask,loc,p,val):
 
 mask = np.zeros((1,256,256)) 
 input_ab = np.zeros((2,256,256)) 
-colorModelDict = {}
+
 @app.get("/api/v1/clear")
 async def clear(timestamp: int):
 
-    global colorModelDict
     global mask
     global input_ab
-    if timestamp not in colorModelDict.keys():
-        return JSONResponse(
-            status_code=404,
-            content='error'
-        )
-    del colorModelDict[str(timestamp)]
+
 
     mask = np.zeros((1,256,256))
     input_ab = np.zeros((2,256,256))
@@ -81,21 +75,20 @@ async def clear(timestamp: int):
 
 @app.post("/api/v1/colorize")
 async def default_color_predict(timestamp: int,file: bytes = File(...)):
-    global colorModelDict
+    global colorModel
     global mask
     global input_ab
-    colorModel = CI.ColorizeImageTorch(Xd=256,maskcent=3)
-    colorModel.prep_net(path='./models/pytorch/pytorch.pth')
+    
 
     mask = np.zeros((1,256,256)) 
     input_ab = np.zeros((2,256,256)) 
 
-    colorModelDict[str(timestamp)] = colorModel
-    colorModelDict[str(timestamp)].load_image(file)
+   
+    colorModel.load_image(file)
 
-    _ = colorModelDict[str(timestamp)].net_forward(input_ab,mask)
+    _ = colorModel.net_forward(input_ab,mask)
 
-    img_out_fullres = colorModelDict[str(timestamp)].get_img_fullres()
+    img_out_fullres = colorModel.get_img_fullres()
 
     converted = img_out_fullres[...,::-1].copy()
     _, img_png = cv2.imencode(".png",converted)
@@ -107,15 +100,11 @@ async def default_color_predict(timestamp: int,file: bytes = File(...)):
 async def user_add_predict(timestamp: int,
         pointsX: str = Form(...),pointsY: str= Form(...), colors: str= Form(...)
     ):
-    global colorModelDict
+
     global mask
     global input_ab
-    print(colorModelDict)
-    if str(timestamp) not in colorModelDict.keys():
-        return JSONResponse(
-            status_code=404,
-            content='error'
-        )
+    global colorModel
+
     x_list      = [int(i) for i in pointsX.split(',')]
     y_list      = [int(i) for i in pointsY.split(',')]
     colors = colors.split(',')
@@ -130,16 +119,16 @@ async def user_add_predict(timestamp: int,
         lab =  convert_color(rgb, LabColor).get_value_tuple() # rgb -> lab
         _color = lab[1:] # lab -> ab
         (input_ab,mask) = put_point(input_ab,mask,[x,y],3,_color)
-        img_out = colorModelDict[str(timestamp)].net_forward(input_ab,mask) # run model, returns 256x256 image
+        img_out = colorModel.net_forward(input_ab,mask) # run model, returns 256x256 image
 
 
-    _ = colorModelDict[str(timestamp)].get_img_mask_fullres() # get input mask in full res
-    _ = colorModelDict[str(timestamp)].get_input_img_fullres() # get input image in full res
-    img_out_fullres = colorModelDict[str(timestamp)].get_img_fullres() # get image at full resolution
+    _ = colorModel.get_img_mask_fullres() # get input mask in full res
+    _ = colorModel.get_input_img_fullres() # get input image in full res
+    img_out_fullres = colorModel.get_img_fullres() # get image at full resolution
 
 
 
-    img_out_fullres = colorModelDict[str(timestamp)].get_img_fullres() # get image at full resolution
+    img_out_fullres = colorModel.get_img_fullres() # get image at full resolution
     converted = img_out_fullres[...,::-1].copy()
 
     _, img_png = cv2.imencode(".png", converted)
